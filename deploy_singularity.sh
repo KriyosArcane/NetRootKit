@@ -18,9 +18,7 @@ fi
 C2_IP="10.2.0.117"
 
 USE_SINGULARITY=false
-if [ "$1" = "-s" ]; then
-    USE_SINGULARITY=true
-fi
+[ "$1" = "-s" ] && USE_SINGULARITY=true
 
 echo "[*] Disabling bash history..."
 
