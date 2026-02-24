@@ -137,7 +137,8 @@ foreach ($b in $AllBeacons) {
 
 Write-Host "    -> Starting Beacons silently..."
 foreach ($b in $AllBeacons) {
-    $processCheck = Get-Process -Name (Split-Path $b -LeafBase) -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $b}
+    # Using .NET GetFileNameWithoutExtension because Split-Path -LeafBase is only available in PowerShell Core (6.0+)
+    $processCheck = Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($b)) -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $b}
     if (-not $processCheck -and (Test-Path $b)) {
         Start-Process -FilePath $b -WindowStyle Hidden -ErrorAction SilentlyContinue
     }
